@@ -1,0 +1,3 @@
+===YOLOv3 SPP csresnext50===
+Config: https://raw.githubusercontent.com/AlexeyAB/darknet/master/cfg/csresnext50-panet-spp-original-optimal.cfg
+Weights: https://drive.google.com/file/d/1aNXdM8qVy11nqTcd2oaVB3mf7ckr258-/view?usp=sharing

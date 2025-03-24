@@ -1,16 +1,48 @@
 import cv2
+import numpy as np
 
 
-def yolo_model():
-    model = cv2.dnn.readNet("YOLO/yolov3-spp.weights", "YOLO/yolov3-spp.cfg")
-    model = cv2.dnn_DetectionModel(model)
-    model.setInputParams(size=(640, 640), scale=1 / 255, swapRB=True, crop=False)
+class YoloDetector:
+    def __init__(self, weights, cfg):
+        model = cv2.dnn.readNet(weights, cfg)
+        model = cv2.dnn_DetectionModel(model)
+        model.setInputParams(size=(608, 608), scale=1 / 255, swapRB=True, crop=False)
+        self.model = model
 
+    def detect(self, img, threshold=0.35, nms_threshold=0.6):
+        # Define the padding to square the images
+        pad = int((img.shape[1] / 2 + 15 - img.shape[0]) / 2)
+        left_img = cv2.copyMakeBorder(img[:, :int(img.shape[1] / 2) + 15], pad, pad, 0, 0, cv2.BORDER_CONSTANT)
+        right_img = cv2.copyMakeBorder(img[:, int(img.shape[1] / 2) - 15:], pad, pad, 0, 0, cv2.BORDER_CONSTANT)
+        # Detect the people
+        left_detects = self._detect(left_img, threshold, nms_threshold)
+        right_detects = self._detect(right_img, threshold, nms_threshold)
+        # Align the right detections w.r.t the padded window
+        right_detects[:, 0] += int(img.shape[1] / 2) - 15
+        # Extract the shared detections
+        left_shared = left_detects[left_detects[:, 0] + left_detects[:, 2] >= img.shape[1] / 2 - 15]
+        left_detects = left_detects[~(left_detects[:, 0] + left_detects[:, 2] >= img.shape[1] / 2 - 15)]
+        left_shared = left_shared[left_shared[:, 0] + left_shared[:, 2] < img.shape[1] / 2 + 13]
+        right_shared = right_detects[right_detects[:, 0] <= img.shape[1] / 2 + 15]
+        right_detects = right_detects[~(right_detects[:, 0] <= img.shape[1] / 2 + 15)]
+        right_shared = right_shared[right_shared[:, 0] > img.shape[1] / 2 - 13]
+        shared = np.vstack([left_shared, right_shared])
+        # Remove the overlapping boxes
+        if len(shared) > 0:
+            indices = cv2.dnn.NMSBoxes(shared[:, :-1].tolist(), shared[:, -1], threshold, 0.25)
+            shared = np.take(shared, indices.reshape(-1), axis=0)
+        # Merge the detections together
+        detects = np.vstack([left_detects, shared, right_detects])
+        # Align all the detections w.r.t the initial window
+        detects[:, 1] -= pad
+        return detects[:, :-1].astype(int)
 
-def yolo(model, frame, threshold=0.3, nms_threshold=0.5):
-    classes, _, rects = model.detect(frame, threshold, nms_threshold)
-    people_rects = [box for (class_id, box) in zip(classes, rects) if class_id.item() == 0 and box[2] < 100]
-    return people_rects
+    def _detect(self, img, threshold, nms_threshold):
+        # Detect in the image, removing non-humans and out of size detections
+        classes, scores, rects = self.model.detect(img, threshold, nms_threshold)
+        detections = np.array([np.append(rect, score) for (class_id, rect, score) in zip(classes, rects, scores)
+                               if class_id.item() == 0 and 20 * 20 < rect[2] * rect[3] < 100 * 100])
+        return detections if len(detections) > 0 else np.empty((0, 5))
 
 
 def haar_model():
